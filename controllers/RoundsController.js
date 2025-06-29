@@ -2,7 +2,7 @@ const axios = require("axios");
 const admin = require("firebase-admin");
 const serviceAccount = require("../serviceAccountKey.json");
 
-// Initn Firebase Admin only once
+// Init Firebase Admin only once
 if (!admin.apps.length) {
   admin.initializeApp({
     credential: admin.credential.cert(serviceAccount),
