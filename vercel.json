@@ -1,10 +1,10 @@
 {
     "crons": [{
         "path": "/api/sync-rounds",
-        "schedule": "* 10 * * *"
+        "schedule": "0 10 * * *"
     },
     {
         "path": "/api/scrape-notices",
-        "schedule": "* 10 * * *"
+        "schedule": "0 10 * * *"
     }]
 }
