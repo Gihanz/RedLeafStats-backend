@@ -1,5 +1,5 @@
 const { Resend } = require('resend');
-const db = require("../lib/firestore"); // db is already the Firestore instance
+const db = require("../lib/firestore");
 
 const resend = new Resend(process.env.RESEND_API_KEY);
 
