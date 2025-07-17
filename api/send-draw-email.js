@@ -1,5 +1,5 @@
 const { Resend } = require('resend');
-const admin = require('firebase-admin');
+const db = require("../lib/firestore");
 
 const resend = new Resend(process.env.RESEND_API_KEY);
 
@@ -7,7 +7,7 @@ export default async function handler(req, res) {
   const { drawname, drawdata, drawcrs, drawsize } = req.body;
 
   try {
-    const snapshot = await admin.firestore()
+    const snapshot = await db
       .collection('users')
       .where('subscribed', '==', true)
       .get();
@@ -25,8 +25,8 @@ export default async function handler(req, res) {
       }
     }
 
-    const promises = usersToNotify.map(user => {
-      return resend.emails.send({
+    const promises = usersToNotify.map(user =>
+      resend.emails.send({
         from: 'RedLeaf Stats <notify@redleafstats.com>',
         to: user.email,
         subject: `🆕 New IRCC Draw: ${drawname} on ${drawdata}`,
@@ -43,19 +43,19 @@ A new Express Entry draw has been published:
 You're receiving this because you subscribed to draw alerts.
 
 To unsubscribe or update your preferences, click here:
-https://redleafstats/preferences?id=${user.id}
+https://redleafstats.com/preferences?id=${user.id}
 
 - RedLeaf Stats
-        `.trim()
-      });
-    });
+        `.trim(),
+      })
+    );
 
     await Promise.all(promises);
 
-    // Update notified field
+    // Update each user's `notified` field
     for (const user of usersToNotify) {
-      await admin.firestore().collection('users').doc(user.id).update({
-        notified: drawdata
+      await db.collection('users').doc(user.id).update({
+        notified: drawdata,
       });
     }
 
