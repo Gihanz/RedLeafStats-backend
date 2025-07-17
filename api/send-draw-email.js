@@ -21,7 +21,7 @@ export default async function handler(req, res) {
     for (const doc of snapshot.docs) {
       const data = doc.data();
       if (!data.lastNotifiedOn || data.lastNotifiedOn !== drawdate) {
-        usersToNotify.push({ id: doc.id, email: data.email });
+        usersToNotify.push({ id: doc.id, email: data.email, fullName: data.fullName });
       }
     }
 
