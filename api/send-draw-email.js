@@ -4,7 +4,7 @@ const db = require("../lib/firestore");
 const resend = new Resend(process.env.RESEND_API_KEY);
 
 export default async function handler(req, res) {
-  const { drawname, drawdata, drawcrs, drawsize } = req.body;
+  const { drawname, drawdate, drawcrs, drawsize } = req.body;
 
   try {
     const snapshot = await db
@@ -20,7 +20,7 @@ export default async function handler(req, res) {
 
     for (const doc of snapshot.docs) {
       const data = doc.data();
-      if (!data.notified || data.notified !== drawdata) {
+      if (!data.lastNotifiedOn || data.lastNotifiedOn !== drawdate) {
         usersToNotify.push({ id: doc.id, email: data.email });
       }
     }
@@ -29,14 +29,14 @@ export default async function handler(req, res) {
       resend.emails.send({
         from: 'RedLeaf Stats <notify@redleafstats.com>',
         to: user.email,
-        subject: `🆕 New IRCC Draw: ${drawname} on ${drawdata}`,
+        subject: `🆕 New IRCC Draw: ${drawname} on ${drawdate}`,
         text: `
 Hello,
 
 A new Express Entry draw has been published:
 
 🔹 Draw Name: ${drawname}
-📅 Draw Date: ${drawdata}
+📅 Draw Date: ${drawdate}
 🎯 CRS Cut-off: ${drawcrs}
 📩 Invitations Issued: ${drawsize}
 
@@ -52,10 +52,10 @@ https://redleafstats.com/preferences?id=${user.id}
 
     await Promise.all(promises);
 
-    // Update each user's `notified` field
+    // Update each user's `lastNotifiedOn` field
     for (const user of usersToNotify) {
       await db.collection('users').doc(user.id).update({
-        notified: drawdata,
+        lastNotifiedOn: drawdate,
       });
     }
 

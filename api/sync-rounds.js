@@ -41,7 +41,7 @@ module.exports = async (req, res) => {
         try {
           await axios.post(`${process.env.BASE_URL}/api/send-draw-email`, {
             drawname: round.drawName || "Unknown Draw",
-            drawdata: round.drawDate || "Unknown date",
+            drawdate: round.drawDate || "Unknown date",
             drawcrs: round.drawCRS || "N/A",
             drawsize: round.drawSize || "N/A",
           });
