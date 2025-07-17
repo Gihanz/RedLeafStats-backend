@@ -20,7 +20,7 @@ export default async function handler(req, res) {
 
     for (const doc of snapshot.docs) {
       const data = doc.data();
-      if (!data.notified || data.notified !== drawdate) {
+      if (!data.lastNotifiedOn || data.lastNotifiedOn !== drawdate) {
         usersToNotify.push({ id: doc.id, email: data.email });
       }
     }
@@ -52,7 +52,7 @@ https://redleafstats.com/preferences?id=${user.id}
 
     await Promise.all(promises);
 
-    // Update each user's `notified` field
+    // Update each user's `lastNotifiedOn` field
     for (const user of usersToNotify) {
       await db.collection('users').doc(user.id).update({
         lastNotifiedOn: drawdate,
