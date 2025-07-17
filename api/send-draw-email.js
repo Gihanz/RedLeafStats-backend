@@ -29,23 +29,23 @@ export default async function handler(req, res) {
       resend.emails.send({
         from: 'RedLeaf Stats <notify@redleafstats.com>',
         to: user.email,
-        subject: `🆕 New IRCC Draw: ${drawname} on ${drawdate}`,
+        subject: `🍁 New ${drawname} Draw on ${drawdate} 🍁`,
         text: `
-Hello,
+Hi ${user.fullName},
 
-A new Express Entry draw has been published:
+A new ${drawname} draw has been published:
 
 🔹 Draw Name: ${drawname}
 📅 Draw Date: ${drawdate}
 🎯 CRS Cut-off: ${drawcrs}
 📩 Invitations Issued: ${drawsize}
 
-You're receiving this because you subscribed to draw alerts.
+You are receiving this email because you subscribed to receive draw alerts from RedLeaf Stats.
 
 To unsubscribe or update your preferences, click here:
 https://redleafstats.com/preferences?id=${user.id}
 
-- RedLeaf Stats
+- 🇨🇦 RedLeaf Stats -
         `.trim(),
       })
     );
