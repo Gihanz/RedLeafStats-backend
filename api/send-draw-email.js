@@ -35,7 +35,7 @@ Hi ${user.fullName},
 
 A new ${drawname} draw has been published:
 
-🔹 Draw Name: ${drawname}
+🔹 Draw Type: ${drawname}
 📅 Draw Date: ${drawdate}
 🎯 CRS Cut-off: ${drawcrs}
 📩 Invitations Issued: ${drawsize}
