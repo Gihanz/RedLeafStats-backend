@@ -9,7 +9,7 @@ export default async function handler(req, res) {
   try {
     const snapshot = await db
       .collection('users')
-      .where('subscribed', '==', true)
+      .where('consentToEmails', '==', true)
       .get();
 
     if (snapshot.empty) {
