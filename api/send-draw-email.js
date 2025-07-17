@@ -45,7 +45,8 @@ You are receiving this email because you subscribed to receive draw alerts from 
 To unsubscribe or update your preferences, click here:
 https://redleafstats.com/preferences?id=${user.id}
 
-- 🇨🇦 RedLeaf Stats -
+Auto generated email by,
+🇨🇦 RedLeaf Stats
         `.trim(),
       })
     );
