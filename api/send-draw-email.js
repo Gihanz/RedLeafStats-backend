@@ -1,5 +1,6 @@
 const { Resend } = require('resend');
 const db = require("../lib/firestore");
+const crypto = require("crypto");
 
 const resend = new Resend(process.env.RESEND_API_KEY);
 
@@ -20,8 +21,20 @@ export default async function handler(req, res) {
 
     for (const doc of snapshot.docs) {
       const data = doc.data();
+
       if (!data.lastNotifiedOn || data.lastNotifiedOn !== drawdate) {
-        usersToNotify.push({ id: doc.id, email: data.email, fullName: data.fullName });
+        // Generate a secure token
+        const unsubscribeToken = crypto.randomBytes(32).toString('hex');
+
+        // Store token in user doc
+        await db.collection('users').doc(doc.id).update({ unsubscribeToken });
+
+        usersToNotify.push({
+          id: doc.id,
+          email: data.email,
+          fullName: data.fullName,
+          unsubscribeToken,
+        });
       }
     }
 
@@ -35,17 +48,17 @@ Hi ${user.fullName},
 
 A new ${drawname} draw has been published:
 
-🔹 Draw Type: ${drawname}
+🍁 Draw Type: ${drawname}
 📅 Draw Date: ${drawdate}
 🎯 CRS Cut-off: ${drawcrs}
 📩 Invitations Issued: ${drawsize}
 
-You are receiving this email because you subscribed to receive draw alerts from RedLeaf Stats.
+You're receiving this email because you subscribed to draw alerts from RedLeaf Stats.
 
 To unsubscribe or update your preferences, click here:
-https://redleafstats.com/preferences?id=${user.id}
+https://redleafstats.com/preferences?token=${user.unsubscribeToken}
 
-Auto generated email by,
+Auto generated email by,  
 🇨🇦 RedLeaf Stats
         `.trim(),
       })
@@ -53,7 +66,7 @@ Auto generated email by,
 
     await Promise.all(promises);
 
-    // Update each user's `lastNotifiedOn` field
+    // Mark users as notified
     for (const user of usersToNotify) {
       await db.collection('users').doc(user.id).update({
         lastNotifiedOn: drawdate,
