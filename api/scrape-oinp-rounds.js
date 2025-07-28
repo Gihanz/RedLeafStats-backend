@@ -11,7 +11,7 @@ module.exports = async (req, res) => {
     const $ = cheerio.load(data);
 
     const drawSections = $("h3:contains('Date issued')").toArray();
-    const rounds = [];
+    const newRounds = [];
 
     for (const section of drawSections) {
       const drawBlock = $(section).nextUntil("h3");
@@ -25,7 +25,14 @@ module.exports = async (req, res) => {
       const drawDate = new Date(drawDateRaw);
       const drawId = drawDate.toISOString().split("T")[0]; // e.g. 2025-06-06
 
-      // Find the table in the section
+      // 🔒 Prevent overwrite: check if draw already exists
+      const existing = await db.collection("oinp_rounds").doc(drawId).get();
+      if (existing.exists) {
+        console.log(`⏩ Skipping existing draw: ${drawId}`);
+        continue;
+      }
+
+      // Parse table
       const table = drawBlock.filter("table").first();
       if (!table || table.length === 0) continue;
 
@@ -47,22 +54,21 @@ module.exports = async (req, res) => {
       });
 
       if (entries.length > 0) {
-        const ref = db.collection("oinp_rounds").doc(drawId);
-        await ref.set({
+        await db.collection("oinp_rounds").doc(drawId).set({
           drawDate: drawDateRaw,
           createdAt: new Date(),
           entries,
         });
 
-        rounds.push({ drawId, entriesCount: entries.length });
-        console.log(`✅ Saved draw ${drawId} with ${entries.length} entries`);
+        newRounds.push({ drawId, entriesCount: entries.length });
+        console.log(`✅ Added new draw: ${drawId}`);
       }
     }
 
     return res.status(200).json({
-      message: "OINP rounds scraped and stored successfully",
-      totalRounds: rounds.length,
-      rounds,
+      message: "OINP rounds scrape completed",
+      newDrawsAdded: newRounds.length,
+      draws: newRounds,
     });
   } catch (err) {
     console.error("❌ Scrape error:", err.message);
