@@ -10,31 +10,41 @@ module.exports = async (req, res) => {
     const { data } = await axios.get(url);
     const $ = cheerio.load(data);
 
-    const drawSections = $("h3:contains('Date issued')").toArray();
+    // Support both h2 and h3 headers
+    const drawSections = $("h2:contains('Date issued'), h3:contains('Date issued')").toArray();
+    console.log(`🔍 Found ${drawSections.length} draw sections`);
+
     const newRounds = [];
 
     for (const section of drawSections) {
-      const drawBlock = $(section).nextUntil("h3");
-
+      const drawBlock = $(section).nextUntil("h2, h3");
       const titleText = $(section).text();
       const dateMatch = titleText.match(/Date issued\s+(.+)/i);
       const drawDateRaw = dateMatch ? dateMatch[1].trim() : null;
 
-      if (!drawDateRaw) continue;
+      if (!drawDateRaw) {
+        console.log("❌ Skipping: couldn't extract draw date from heading:", titleText);
+        continue;
+      }
+
+      console.log(`🗓️ Draw heading: ${titleText}`);
+      console.log(`📅 Parsed date: ${drawDateRaw}`);
 
       const drawDate = new Date(drawDateRaw);
       const drawId = drawDate.toISOString().split("T")[0]; // e.g. 2025-06-06
 
-      // 🔒 Prevent overwrite: check if draw already exists
+      // 🔒 Prevent overwriting existing
       const existing = await db.collection("oinp_rounds").doc(drawId).get();
       if (existing.exists) {
         console.log(`⏩ Skipping existing draw: ${drawId}`);
         continue;
       }
 
-      // Parse table
       const table = drawBlock.filter("table").first();
-      if (!table || table.length === 0) continue;
+      if (!table || table.length === 0) {
+        console.log(`⚠️ No table found under ${drawId}`);
+        continue;
+      }
 
       const rows = $(table).find("tbody tr");
       const entries = [];
@@ -61,7 +71,9 @@ module.exports = async (req, res) => {
         });
 
         newRounds.push({ drawId, entriesCount: entries.length });
-        console.log(`✅ Added new draw: ${drawId}`);
+        console.log(`✅ Saved new draw: ${drawId} (${entries.length} entries)`);
+      } else {
+        console.log(`⚠️ No valid entries found in table for ${drawId}`);
       }
     }
 
