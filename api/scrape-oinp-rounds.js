@@ -7,100 +7,68 @@ module.exports = async (req, res) => {
 
   try {
     const url = "https://www.ontario.ca/page/ontario-immigrant-nominee-program-oinp-invitations-apply";
-
-    const { data } = await axios.get(url, {
-      headers: { "User-Agent": "Mozilla/5.0" }, // help avoid blocking
-    });
-
+    const { data } = await axios.get(url);
     const $ = cheerio.load(data);
-    const results = [];
 
-    // The page groups draws by year inside div.field__item with h2 as year header
-    $(".field__item").each((_, el) => {
-      const year = $(el).find("h2").text().trim();
-      if (!year) return;
+    const newDraws = [];
 
-      // Each draw is a list item <li> under that year section
-      $(el).find("ul > li").each((_, li) => {
-        const text = $(li).text().trim();
+    $("table").each((_, table) => {
+      const headers = [];
+      const rows = [];
 
-        // Example draw text format:
-        // "June 6, 2025 — 6 invitations issued for the In-Demand Skills stream."
-        const regex = /^(.+?)\s*—\s*(\d+)\s*invitations\s*issued\s*for\s*the\s*(.+?)\s*stream\.?(.*)$/i;
-        const match = text.match(regex);
+      $(table)
+        .find("thead tr th")
+        .each((_, th) => {
+          headers.push($(th).text().trim().toLowerCase().replace(/\s+/g, "_"));
+        });
 
-        if (match) {
-          const [_, dateStr, invitesStr, stream, notes] = match;
+      $(table)
+        .find("tbody tr")
+        .each((_, tr) => {
+          const cells = $(tr).find("td");
+          if (cells.length !== headers.length) return;
 
-          results.push({
-            drawDate: dateStr.trim(),
-            invitations_issued: parseInt(invitesStr, 10),
-            stream: stream.trim(),
-            notes: notes ? notes.trim() : "",
-            year,
-            rawText: text,
+          const draw = {};
+          cells.each((i, td) => {
+            draw[headers[i]] = $(td).text().trim();
           });
-        } else {
-          // Fallback if pattern doesn't match, still save raw text for inspection
-          results.push({
-            drawDate: null,
-            invitations_issued: null,
-            stream: null,
-            notes: "",
-            year,
-            rawText: text,
-          });
-        }
-      });
+
+          if (draw.date_issued) {
+            draw.drawId = draw.date_issued.replace(/[^a-zA-Z0-9]/g, "-"); // safe ID
+            rows.push(draw);
+          }
+        });
+
+      newDraws.push(...rows);
     });
 
-    if (results.length === 0) {
-      console.log("⚠️ No draws found on the page.");
-      return res.status(404).json({ message: "No draws found." });
-    }
+    console.log(`🔍 Found ${newDraws.length} draws in tables`);
 
-    let savedCount = 0;
+    const inserted = [];
 
-    for (const draw of results) {
-      if (!draw.drawDate) {
-        console.log("⚠️ Skipping draw with no valid date:", draw.rawText);
-        continue;
+    for (const draw of newDraws) {
+      const ref = db.collection("oinp_rounds").doc(draw.drawId);
+      const existing = await ref.get();
+
+      if (!existing.exists) {
+        await ref.set({
+          ...draw,
+          createdAt: new Date(),
+        });
+        inserted.push(draw);
+        console.log(`✅ New draw added: ${draw.drawId}`);
+      } else {
+        console.log(`⏩ Draw already exists: ${draw.drawId}`);
       }
-
-      const drawId = new Date(draw.drawDate).toISOString().split("T")[0];
-      if (!drawId) {
-        console.log("⚠️ Invalid date for draw, skipping:", draw.drawDate);
-        continue;
-      }
-
-      const docRef = db.collection("oinp_rounds").doc(drawId);
-      const existing = await docRef.get();
-      if (existing.exists) {
-        console.log(`⏩ Skipping existing draw: ${drawId}`);
-        continue;
-      }
-
-      await docRef.set({
-        drawDate: draw.drawDate,
-        year: draw.year,
-        invitations_issued: draw.invitations_issued,
-        stream: draw.stream,
-        notes: draw.notes,
-        createdAt: new Date(),
-        rawText: draw.rawText,
-      });
-
-      console.log(`✅ Saved new draw: ${drawId}`);
-      savedCount++;
     }
 
     return res.status(200).json({
       message: "OINP rounds scrape completed",
-      drawsFound: results.length,
-      drawsSaved: savedCount,
+      newDrawsAdded: inserted.length,
+      draws: inserted,
     });
-  } catch (error) {
-    console.error("❌ Scrape failed:", error);
-    return res.status(500).json({ error: "Scrape failed" });
+  } catch (err) {
+    console.error("❌ Error scraping OINP rounds:", err.message);
+    return res.status(500).json({ error: "Failed to scrape OINP rounds" });
   }
 };
