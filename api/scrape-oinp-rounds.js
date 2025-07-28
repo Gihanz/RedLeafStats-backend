@@ -6,11 +6,12 @@ module.exports = async (req, res) => {
   console.log("🌐 Starting scrape of OINP rounds...");
 
   try {
-    const url = "https://www.ontario.ca/page/ontario-immigrant-nominee-program-oinp-invitations-apply";
+    const url =
+      "https://www.ontario.ca/page/ontario-immigrant-nominee-program-oinp-invitations-apply";
     const { data } = await axios.get(url);
     const $ = cheerio.load(data);
 
-    const newDraws = [];
+    const inserted = [];
 
     $("table").each((_, table) => {
       const headers = [];
@@ -19,7 +20,9 @@ module.exports = async (req, res) => {
       $(table)
         .find("thead tr th")
         .each((_, th) => {
-          headers.push($(th).text().trim().toLowerCase().replace(/\s+/g, "_"));
+          headers.push(
+            $(th).text().trim().toLowerCase().replace(/\s+/g, "_")
+          );
         });
 
       $(table)
@@ -33,34 +36,35 @@ module.exports = async (req, res) => {
             draw[headers[i]] = $(td).text().trim();
           });
 
-          if (draw.date_issued) {
-            draw.drawId = draw.date_issued.replace(/[^a-zA-Z0-9]/g, "-"); // safe ID
-            rows.push(draw);
+          if (draw.date_issued && draw.stream) {
+            const drawId = draw.date_issued.replace(/[^a-zA-Z0-9]/g, "-");
+            const year = new Date(draw.date_issued).getFullYear().toString();
+            const stream = draw.stream;
+
+            rows.push({ ...draw, drawId, year, stream });
           }
         });
 
-      newDraws.push(...rows);
+      rows.forEach(async (draw) => {
+        const docRef = db
+          .collection("oinp_rounds")
+          .doc(draw.year)
+          .collection(draw.stream)
+          .doc(draw.drawId);
+
+        const existing = await docRef.get();
+        if (!existing.exists) {
+          await docRef.set({
+            ...draw,
+            createdAt: new Date(),
+          });
+          inserted.push(draw);
+          console.log(`✅ Added ${draw.drawId} under ${draw.year}/${draw.stream}`);
+        } else {
+          console.log(`⏩ Skipped existing draw ${draw.drawId}`);
+        }
+      });
     });
-
-    console.log(`🔍 Found ${newDraws.length} draws in tables`);
-
-    const inserted = [];
-
-    for (const draw of newDraws) {
-      const ref = db.collection("oinp_rounds").doc(draw.drawId);
-      const existing = await ref.get();
-
-      if (!existing.exists) {
-        await ref.set({
-          ...draw,
-          createdAt: new Date(),
-        });
-        inserted.push(draw);
-        console.log(`✅ New draw added: ${draw.drawId}`);
-      } else {
-        console.log(`⏩ Draw already exists: ${draw.drawId}`);
-      }
-    }
 
     return res.status(200).json({
       message: "OINP rounds scrape completed",
