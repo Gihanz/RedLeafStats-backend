@@ -1,6 +1,7 @@
 const axios = require("axios");
 const cheerio = require("cheerio");
-const db = require("../lib/firestore"); // make sure this is your initialized Firestore instance
+const crypto = require("crypto");
+const db = require("../lib/firestore"); // your Firestore instance
 
 module.exports = async (req, res) => {
   console.log("🌐 Starting scrape of OINP rounds...");
@@ -10,64 +11,93 @@ module.exports = async (req, res) => {
     const { data } = await axios.get(url);
     const $ = cheerio.load(data);
 
-    const allDraws = [];
+    const inserted = [];
+    const drawYearToDraws = {};
+    const drawYearToSummary = {};
 
-    $("table").each((_, table) => {
-      const headers = [];
+    $("h2").each((_, h2) => {
+      const headingText = $(h2).text().trim();
+      const match = headingText.match(/Invitations to apply issued in (\d{4})/);
+      if (!match) return;
 
-      $(table)
-        .find("thead tr th")
-        .each((_, th) => {
-          headers.push($(th).text().trim().toLowerCase().replace(/\s+/g, "_"));
-        });
+      const year = match[1];
 
-      $(table)
-        .find("tbody tr")
-        .each((_, tr) => {
-          const cells = $(tr).find("td");
-          if (cells.length !== headers.length) return;
+      // Get summary (ul right after h2)
+      const $ul = $(h2).next("ul");
+      const summary = {};
+      $ul.find("li").each((_, li) => {
+        const text = $(li).text().trim();
+        const [label, value] = text.split("—").map(s => s.trim());
+        if (label && value) {
+          summary[label] = parseInt(value.replace(/,/g, ""), 10);
+        }
+      });
+      drawYearToSummary[year] = summary;
 
-          const draw = {};
-          cells.each((i, td) => {
-            draw[headers[i]] = $(td).text().trim();
+      // Now find tables between this h2 and next h2
+      let $next = $(h2).next();
+      while ($next.length && !$next.is("h2")) {
+        if ($next.is("table")) {
+          const headers = [];
+          $next.find("thead tr th").each((_, th) => {
+            headers.push($(th).text().trim().toLowerCase().replace(/\s+/g, "_"));
           });
 
-          // Infer stream name from previous heading (above the table)
-          const stream = $(table).prevAll("h2, h3, h4").first().text().trim();
-          if (stream && draw.date_issued) {
+          $next.find("tbody tr").each((_, tr) => {
+            const cells = $(tr).find("td");
+            if (cells.length !== headers.length) return;
+
+            const draw = {};
+            cells.each((i, td) => {
+              draw[headers[i]] = $(td).text().trim();
+            });
+
+            // Stream name from closest previous h3/h4 before this table
+            const stream = $next.prevAll("h3, h4").first().text().trim() || "Unknown Stream";
+            if (!drawYearToDraws[year]) drawYearToDraws[year] = [];
             draw.stream = stream;
-            allDraws.push(draw);
-          }
-        });
+            drawYearToDraws[year].push(draw);
+          });
+        }
+
+        $next = $next.next();
+      }
     });
 
-    console.log(`🔍 Found ${allDraws.length} draws`);
+    for (const [year, draws] of Object.entries(drawYearToDraws)) {
+      const yearRef = db.collection("oinp_rounds").doc(year);
 
-    const inserted = [];
+      for (const draw of draws) {
+        const streamRef = yearRef.collection(draw.stream);
+        const drawCopy = { ...draw };
+        delete drawCopy.createdAt;
 
-    for (const draw of allDraws) {
-      const drawYear = draw.date_issued.split(" ").pop(); // last word of date e.g., "2025"
-      const streamRef = db
-        .collection("oinp_rounds")
-        .doc(drawYear)
-        .collection(draw.stream);
+        // Generate a hash based on draw contents
+        const hashId = crypto
+          .createHash("md5")
+          .update(JSON.stringify(drawCopy))
+          .digest("hex");
 
-      // Prevent duplicates by checking if same date_issued already exists
-      const snapshot = await streamRef
-        .where("date_issued", "==", draw.date_issued)
-        .get();
+        const existingDoc = await streamRef.doc(hashId).get();
+        if (existingDoc.exists) {
+          console.log(`⏩ Skipped duplicate: ${draw.date_issued} [${draw.stream}]`);
+        } else {
+          await streamRef.doc(hashId).set({
+            ...draw,
+            createdAt: new Date(),
+          });
+          inserted.push({ ...draw, id: hashId });
+          console.log(`✅ Added: ${draw.date_issued} [${draw.stream}]`);
+        }
+      }
 
-      const alreadyExists = !snapshot.empty;
-
-      if (!alreadyExists) {
-        await streamRef.add({
-          ...draw,
-          createdAt: new Date(),
+      // Save summary under the same year doc
+      if (drawYearToSummary[year]) {
+        await yearRef.collection("summary").doc("totals").set({
+          ...drawYearToSummary[year],
+          updatedAt: new Date(),
         });
-        inserted.push(draw);
-        console.log(`✅ Added: ${draw.date_issued} [${draw.stream}]`);
-      } else {
-        console.log(`⏩ Skipped duplicate: ${draw.date_issued} [${draw.stream}]`);
+        console.log(`📊 Summary saved for year ${year}`);
       }
     }
 
