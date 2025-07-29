@@ -1,28 +1,24 @@
 const axios = require("axios");
 const cheerio = require("cheerio");
-const db = require("../lib/firestore");
+const db = require("../lib/firestore"); // make sure this is your initialized Firestore instance
 
 module.exports = async (req, res) => {
   console.log("🌐 Starting scrape of OINP rounds...");
 
   try {
-    const url =
-      "https://www.ontario.ca/page/ontario-immigrant-nominee-program-oinp-invitations-apply";
+    const url = "https://www.ontario.ca/page/ontario-immigrant-nominee-program-oinp-invitations-apply";
     const { data } = await axios.get(url);
     const $ = cheerio.load(data);
 
-    const inserted = [];
+    const allDraws = [];
 
     $("table").each((_, table) => {
       const headers = [];
-      const rows = [];
 
       $(table)
         .find("thead tr th")
         .each((_, th) => {
-          headers.push(
-            $(th).text().trim().toLowerCase().replace(/\s+/g, "_")
-          );
+          headers.push($(th).text().trim().toLowerCase().replace(/\s+/g, "_"));
         });
 
       $(table)
@@ -36,35 +32,44 @@ module.exports = async (req, res) => {
             draw[headers[i]] = $(td).text().trim();
           });
 
-          if (draw.date_issued && draw.stream) {
-            const drawId = draw.date_issued.replace(/[^a-zA-Z0-9]/g, "-");
-            const year = new Date(draw.date_issued).getFullYear().toString();
-            const stream = draw.stream;
-
-            rows.push({ ...draw, drawId, year, stream });
+          // Infer stream name from previous heading (above the table)
+          const stream = $(table).prevAll("h2, h3, h4").first().text().trim();
+          if (stream && draw.date_issued) {
+            draw.stream = stream;
+            allDraws.push(draw);
           }
         });
-
-      rows.forEach(async (draw) => {
-        const docRef = db
-          .collection("oinp_rounds")
-          .doc(draw.year)
-          .collection(draw.stream)
-          .doc(draw.drawId);
-
-        const existing = await docRef.get();
-        if (!existing.exists) {
-          await docRef.set({
-            ...draw,
-            createdAt: new Date(),
-          });
-          inserted.push(draw);
-          console.log(`✅ Added ${draw.drawId} under ${draw.year}/${draw.stream}`);
-        } else {
-          console.log(`⏩ Skipped existing draw ${draw.drawId}`);
-        }
-      });
     });
+
+    console.log(`🔍 Found ${allDraws.length} draws`);
+
+    const inserted = [];
+
+    for (const draw of allDraws) {
+      const drawYear = draw.date_issued.split(" ").pop(); // last word of date e.g., "2025"
+      const streamRef = db
+        .collection("oinp_rounds")
+        .doc(drawYear)
+        .collection(draw.stream);
+
+      // Prevent duplicates by checking if same date_issued already exists
+      const snapshot = await streamRef
+        .where("date_issued", "==", draw.date_issued)
+        .get();
+
+      const alreadyExists = !snapshot.empty;
+
+      if (!alreadyExists) {
+        await streamRef.add({
+          ...draw,
+          createdAt: new Date(),
+        });
+        inserted.push(draw);
+        console.log(`✅ Added: ${draw.date_issued} [${draw.stream}]`);
+      } else {
+        console.log(`⏩ Skipped duplicate: ${draw.date_issued} [${draw.stream}]`);
+      }
+    }
 
     return res.status(200).json({
       message: "OINP rounds scrape completed",
