@@ -1,6 +1,6 @@
 {
     "crons": [{
-        "path": "/api/sync-rounds",
+        "path": "/api/sync-ee-rounds",
         "schedule": "0 17 * * *"
     },
     {
