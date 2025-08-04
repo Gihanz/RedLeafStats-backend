@@ -1,8 +1,3 @@
-const axios = require("axios");
-const cheerio = require("cheerio");
-const crypto = require("crypto");
-const db = require("../lib/firestore"); // Firestore instance
-
 module.exports = async (req, res) => {
   console.log("🌐 Starting scrape of OINP rounds...");
 
@@ -32,8 +27,10 @@ module.exports = async (req, res) => {
 
           const stream = $next.prevAll("h3, h4").first().text().trim() || "Unknown Stream";
 
+          // Flag for data tables
           const isDataTable = headers.includes("date_issued") || headers.includes("number_of_invitations");
 
+          // Process the table rows
           $next.find("tbody tr").each((_, tr) => {
             const cells = $(tr).find("td");
             if (cells.length !== headers.length) return;
@@ -43,11 +40,13 @@ module.exports = async (req, res) => {
               draw[headers[i]] = $(td).text().trim();
             });
 
+            // Additional fields for all rows (data and summary)
             draw.stream = stream;
             draw.year = parseInt(year, 10);
             draw.createdAt = new Date();
-            draw.document_type = isDataTable ? "data" : "summary";
+            draw.document_type = isDataTable ? "data" : "summary"; // Determine if it is a data or summary row
 
+            // Create hash ID for each row (excluding createdAt)
             const drawForHash = { ...draw };
             delete drawForHash.createdAt;
             const hashId = crypto
