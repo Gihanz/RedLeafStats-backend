@@ -13,6 +13,7 @@ module.exports = async (req, res) => {
 
     const inserted = [];
 
+    // Loop through each h2 tag to find year headers
     $("h2").each((_, h2) => {
       const headingText = $(h2).text().trim();
       const match = headingText.match(/Invitations to apply issued in (\d{4})/);
@@ -21,6 +22,7 @@ module.exports = async (req, res) => {
       const year = match[1];
 
       let $next = $(h2).next();
+      // Loop through the next sibling elements until another h2 is found
       while ($next.length && !$next.is("h2")) {
         if ($next.is("table")) {
           const headers = [];
@@ -32,22 +34,26 @@ module.exports = async (req, res) => {
 
           const stream = $next.prevAll("h3, h4").first().text().trim() || "Unknown Stream";
 
+          // Flag to check if the table is a data table
           const isDataTable = headers.includes("date_issued") || headers.includes("number_of_invitations");
 
+          // Loop through table rows and extract data
           $next.find("tbody tr").each((_, tr) => {
             const cells = $(tr).find("td");
-            if (cells.length !== headers.length) return;
+            if (cells.length !== headers.length) return; // Skip rows with incorrect cell count
 
             const draw = {};
             cells.each((i, td) => {
               draw[headers[i]] = $(td).text().trim();
             });
 
+            // Add additional fields for all rows (data or summary)
             draw.stream = stream;
             draw.year = parseInt(year, 10);
             draw.createdAt = new Date();
-            draw.document_type = isDataTable ? "data" : "summary";
+            draw.document_type = isDataTable ? "data" : "summary"; // Determine if it's a data or summary row
 
+            // Generate a hash ID based on the data (excluding createdAt)
             const drawForHash = { ...draw };
             delete drawForHash.createdAt;
             const hashId = crypto
@@ -66,6 +72,7 @@ module.exports = async (req, res) => {
     });
 
     let addedCount = 0;
+    // Insert the scraped data into Firestore
     for (const draw of inserted) {
       const ref = db.collection("oinp_rounds").doc(draw.id);
       const existing = await ref.get();
