@@ -1,7 +1,7 @@
 const axios = require("axios");
 const cheerio = require("cheerio");
 const crypto = require("crypto");
-const db = require("../lib/firestore"); // your Firestore instance
+const db = require("../lib/firestore"); // Firestore instance
 
 module.exports = async (req, res) => {
   console.log("🌐 Starting scrape of OINP rounds...");
@@ -30,6 +30,10 @@ module.exports = async (req, res) => {
             );
           });
 
+          const stream = $next.prevAll("h3, h4").first().text().trim() || "Unknown Stream";
+
+          const isDataTable = headers.includes("date_issued") || headers.includes("number_of_invitations");
+
           $next.find("tbody tr").each((_, tr) => {
             const cells = $(tr).find("td");
             if (cells.length !== headers.length) return;
@@ -39,12 +43,11 @@ module.exports = async (req, res) => {
               draw[headers[i]] = $(td).text().trim();
             });
 
-            const stream = $next.prevAll("h3, h4").first().text().trim() || "Unknown Stream";
             draw.stream = stream;
             draw.year = parseInt(year, 10);
             draw.createdAt = new Date();
+            draw.document_type = isDataTable ? "data" : "summary";
 
-            // Generate a hash based on core draw contents (excluding createdAt)
             const drawForHash = { ...draw };
             delete drawForHash.createdAt;
             const hashId = crypto
@@ -52,9 +55,8 @@ module.exports = async (req, res) => {
               .update(JSON.stringify(drawForHash))
               .digest("hex");
 
-            draw.id = hashId; // Optional: store ID inside doc
+            draw.id = hashId;
 
-            // Insert into flat collection: oinp_rounds
             inserted.push({ ...draw, id: hashId });
           });
         }
@@ -63,18 +65,17 @@ module.exports = async (req, res) => {
       }
     });
 
-    // Save all new draws to Firestore
     let addedCount = 0;
     for (const draw of inserted) {
       const ref = db.collection("oinp_rounds").doc(draw.id);
       const existing = await ref.get();
       if (existing.exists) {
-        console.log(`⏩ Skipped existing draw ${draw.date_issued} [${draw.stream}]`);
+        console.log(`⏩ Skipped existing draw ${draw.date_issued || draw.stream} [${draw.stream}]`);
         continue;
       }
       await ref.set(draw);
       addedCount++;
-      console.log(`✅ Added draw ${draw.date_issued} [${draw.stream}]`);
+      console.log(`✅ Added draw ${draw.date_issued || draw.stream} [${draw.stream}]`);
     }
 
     return res.status(200).json({
