@@ -22,7 +22,30 @@ module.exports = async (req, res) => {
       const year = match[1];
 
       let $next = $(h2).next();
-      // Loop through the next sibling elements until another h2 is found
+      // Process the <ul> summary if it exists right after the h2
+      if ($next.is("ul")) {
+        // If there's a <ul> under the h2, treat it as a summary and add it
+        const summaryItems = [];
+        $next.find("li").each((_, li) => {
+          summaryItems.push($(li).text().trim());
+        });
+
+        if (summaryItems.length > 0) {
+          const summary = {
+            year,
+            stream: "Unknown Stream", // For simplicity, or extract stream if applicable
+            summaryItems, // List of items in the summary
+            createdAt: new Date(),
+            document_type: "summary",
+            id: crypto.createHash("md5").update(summaryItems.join(",")).digest("hex"), // Generate a unique ID based on the items
+          };
+          inserted.push(summary);
+          console.log(`✅ Added summary for year ${year}`);
+        }
+      }
+
+      // Now process the tables (data tables)
+      $next = $next.next();
       while ($next.length && !$next.is("h2")) {
         if ($next.is("table")) {
           const headers = [];
