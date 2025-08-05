@@ -1,7 +1,7 @@
 const axios = require("axios");
 const cheerio = require("cheerio");
 const crypto = require("crypto");
-const db = require("../lib/firestore"); // Firestore instance
+const db = require("../lib/firestore");
 
 module.exports = async (req, res) => {
   console.log("🌐 Starting scrape of OINP rounds...");
@@ -13,7 +13,6 @@ module.exports = async (req, res) => {
 
     const inserted = [];
 
-    // Loop through each h2 tag to find year headers
     $("h2").each((_, h2) => {
       const headingText = $(h2).text().trim();
       const match = headingText.match(/Invitations to apply issued in (\d{4})/);
@@ -22,9 +21,7 @@ module.exports = async (req, res) => {
       const year = match[1];
 
       let $next = $(h2).next();
-      // Process the <ul> summary if it exists right after the h2
       if ($next.is("ul")) {
-        // If there's a <ul> under the h2, treat it as a summary and add it
         const summaryItems = [];
         $next.find("li").each((_, li) => {
           summaryItems.push($(li).text().trim());
@@ -33,18 +30,18 @@ module.exports = async (req, res) => {
         if (summaryItems.length > 0) {
           const summary = {
             year,
-            stream: "Unknown Stream", // For simplicity, or extract stream if applicable
-            summaryItems, // List of items in the summary
+            stream: "Unknown Stream",
+            summaryItems,
             createdAt: new Date(),
             document_type: "summary",
-            id: crypto.createHash("md5").update(summaryItems.join(",")).digest("hex"), // Generate a unique ID based on the items
+            id: crypto.createHash("md5").update(summaryItems.join(",")).digest("hex"),
           };
           inserted.push(summary);
           console.log(`✅ Added summary for year ${year}`);
         }
       }
 
-      // Now process the tables (data tables)
+      // Process draw tables
       $next = $next.next();
       while ($next.length && !$next.is("h2")) {
         if ($next.is("table")) {
@@ -57,26 +54,22 @@ module.exports = async (req, res) => {
 
           const stream = $next.prevAll("h3, h4").first().text().trim() || "Unknown Stream";
 
-          // Flag to check if the table is a data table
           const isDataTable = headers.includes("date_issued") || headers.includes("number_of_invitations");
 
-          // Loop through table rows and extract data
           $next.find("tbody tr").each((_, tr) => {
             const cells = $(tr).find("td");
-            if (cells.length !== headers.length) return; // Skip rows with incorrect cell count
+            if (cells.length !== headers.length) return;
 
             const draw = {};
             cells.each((i, td) => {
               draw[headers[i]] = $(td).text().trim();
             });
 
-            // Add additional fields for all rows (data or summary)
             draw.stream = stream;
             draw.year = parseInt(year, 10);
             draw.createdAt = new Date();
-            draw.document_type = isDataTable ? "data" : "summary"; // Determine if it's a data or summary row
+            draw.document_type = isDataTable ? "draw" : "summary"; 
 
-            // Generate a hash ID based on the data (excluding createdAt)
             const drawForHash = { ...draw };
             delete drawForHash.createdAt;
             const hashId = crypto
@@ -95,7 +88,7 @@ module.exports = async (req, res) => {
     });
 
     let addedCount = 0;
-    // Insert the scraped data into Firestore
+
     for (const draw of inserted) {
       const ref = db.collection("oinp_rounds").doc(draw.id);
       const existing = await ref.get();
