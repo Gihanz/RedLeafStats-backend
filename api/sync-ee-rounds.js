@@ -28,7 +28,7 @@ module.exports = async (req, res) => {
       const existing = await docRef.get();
 
       if (!existing.exists) {
-        // ➕ Create new document
+        // Create new document
         await docRef.set(round);
         savedCount++;
         console.log(`✅ Saved round: ${id}`);
@@ -36,7 +36,7 @@ module.exports = async (req, res) => {
 
       const docData = (await docRef.get()).data();
 
-      // 🔍 Check if notification was already sent
+      // Check if notification was already sent
       if (!docData?.notified) {
         try {
           await axios.post(`${process.env.BASE_URL}/api/send-draw-email`, {
@@ -46,7 +46,7 @@ module.exports = async (req, res) => {
             drawsize: round.drawSize || "N/A",
           });
 
-          // ✅ Mark as notified
+          //  Mark as notified
           await docRef.update({ notified: true });
           emailedCount++;
           console.log(`📧 Email sent and marked notified for round ${id}`);
