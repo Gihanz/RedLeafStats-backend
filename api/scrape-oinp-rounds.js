@@ -7,7 +7,8 @@ module.exports = async (req, res) => {
   console.log("🌐 Starting scrape of OINP rounds...");
 
   try {
-    const url = "https://www.ontario.ca/page/ontario-immigrant-nominee-program-oinp-invitations-apply";
+    const url =
+      "https://www.ontario.ca/page/ontario-immigrant-nominee-program-oinp-invitations-apply";
     const { data } = await axios.get(url);
     const $ = cheerio.load(data);
 
@@ -34,7 +35,10 @@ module.exports = async (req, res) => {
             summaryItems,
             createdAt: new Date(),
             document_type: "summary",
-            id: crypto.createHash("md5").update(summaryItems.join(",")).digest("hex"),
+            id: crypto
+              .createHash("md5")
+              .update(summaryItems.join(","))
+              .digest("hex"),
           };
           inserted.push(summary);
           console.log(`✅ Added summary for year ${year}`);
@@ -52,9 +56,12 @@ module.exports = async (req, res) => {
             );
           });
 
-          const stream = $next.prevAll("h3, h4").first().text().trim() || "Unknown Stream";
+          const stream =
+            $next.prevAll("h3, h4").first().text().trim() || "Unknown Stream";
 
-          const isDataTable = headers.includes("date_issued") || headers.includes("number_of_invitations");
+          const isDataTable =
+            headers.includes("date_issued") ||
+            headers.includes("number_of_invitations");
 
           $next.find("tbody tr").each((_, tr) => {
             const cells = $(tr).find("td");
@@ -68,7 +75,7 @@ module.exports = async (req, res) => {
             draw.stream = stream;
             draw.year = parseInt(year, 10);
             draw.createdAt = new Date();
-            draw.document_type = isDataTable ? "draw" : "summary"; 
+            draw.document_type = isDataTable ? "draw" : "summary";
 
             const drawForHash = { ...draw };
             delete drawForHash.createdAt;
@@ -88,26 +95,61 @@ module.exports = async (req, res) => {
     });
 
     let addedCount = 0;
+    let emailedCount = 0;
+    let skippedCount = 0;
 
     for (const draw of inserted) {
       const ref = db.collection("oinp_rounds").doc(draw.id);
       const existing = await ref.get();
-      if (existing.exists) {
-        console.log(`⏩ Skipped existing draw ${draw.date_issued || draw.stream} [${draw.stream}]`);
-        continue;
+
+      if (!existing.exists) {
+        // Add new document with notified flag
+        await ref.set({ ...draw, notified: false });
+        addedCount++;
+        console.log(
+          `✅ Added new OINP draw ${draw.date_issued || draw.stream} [${
+            draw.stream
+          }]`
+        );
       }
-      await ref.set(draw);
-      addedCount++;
-      console.log(`✅ Added draw ${draw.date_issued || draw.stream} [${draw.stream}]`);
+
+      const docData = (await ref.get()).data();
+
+      // Only send emails for actual draws, not summaries
+      if (docData?.document_type === "draw" && !docData?.notified) {
+        try {
+          await axios.post(`${process.env.BASE_URL}/api/send-oinp-draw-email`, {
+            stream: docData.stream || "Unknown Stream",
+            dateIssued: docData.date_issued || "Unknown Date",
+            crsRange: docData.crs_range || "N/A",
+            issued: docData.number_of_invitations || "N/A",
+          });
+
+          await ref.update({ notified: true });
+          emailedCount++;
+          console.log(`📧 Email sent + marked notified for ${draw.id}`);
+        } catch (err) {
+          console.error(
+            `⚠️ Failed to send email for OINP draw ${draw.id}:`,
+            err.message
+          );
+        }
+      } else {
+        skippedCount++;
+      }
     }
 
     return res.status(200).json({
       message: "OINP rounds scraped and stored",
       newDrawsAdded: addedCount,
+      emailed: emailedCount,
+      skipped: skippedCount,
       totalScraped: inserted.length,
     });
   } catch (err) {
     console.error("❌ Scraping error:", err.message);
-    return res.status(500).json({ error: "Failed to scrape OINP draws" });
+    return res
+      .status(500)
+      .json({ error: "Failed to scrape OINP draws" });
   }
 };

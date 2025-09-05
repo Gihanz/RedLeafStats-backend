@@ -4,6 +4,10 @@
         "schedule": "0 17 * * *"
     },
     {
+        "path": "/api/scrape-oinp-rounds",
+        "schedule": "0 17 * * *"
+    },
+    {
         "path": "/api/scrape-notices",
         "schedule": "0 17 * * *"
     }]
