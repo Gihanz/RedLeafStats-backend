@@ -39,7 +39,7 @@ module.exports = async (req, res) => {
       // Check if notification was already sent
       if (!docData?.notified) {
         try {
-          await axios.post(`${process.env.BASE_URL}/api/send-draw-email`, {
+          await axios.post(`${process.env.BASE_URL}/api/send-ee-draw-email`, {
             drawname: round.drawName || "Unknown Draw",
             drawdate: round.drawDate || "Unknown date",
             drawcrs: round.drawCRS || "N/A",

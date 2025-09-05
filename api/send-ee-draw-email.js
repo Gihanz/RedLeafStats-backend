@@ -42,7 +42,7 @@ export default async function handler(req, res) {
       resend.emails.send({
         from: 'RedLeaf Stats <notify@redleafstats.com>',
         to: user.email,
-        subject: `🍁 New ${drawname} Draw on ${drawdate} 🍁`,
+        subject: `🍁 New IRCC ${drawname} Draw on ${drawdate} 🍁`,
         text: `
 Hi ${user.fullName},
 
