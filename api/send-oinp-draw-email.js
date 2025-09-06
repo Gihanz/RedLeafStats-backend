@@ -5,7 +5,7 @@ const crypto = require("crypto");
 const resend = new Resend(process.env.RESEND_API_KEY);
 
 export default async function handler(req, res) {
-  const { stream, dateIssued, crsRange, issued } = req.body;
+  const { stream, dateIssued, scoreRange, invitationsIssued } = req.body;
 
   try {
     const snapshot = await db
@@ -48,8 +48,8 @@ A new OINP ${stream} draw has been published:
 
 📌 Stream: ${stream}
 📅 Date Issued: ${dateIssued}
-🎯 Score Range: ${crsRange}
-📩 Invitations Issued: ${issued}
+🎯 Score Range: ${scoreRange}
+📩 Invitations Issued: ${invitationsIssued}
 
 You're receiving this email because you subscribed to draw alerts from RedLeaf Stats.
 

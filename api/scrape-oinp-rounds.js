@@ -121,8 +121,8 @@ module.exports = async (req, res) => {
           await axios.post(`${process.env.BASE_URL}/api/send-oinp-draw-email`, {
             stream: docData.stream || "Unknown Stream",
             dateIssued: docData.date_issued || "Unknown Date",
-            crsRange: docData.crs_range || "N/A",
-            issued: docData.number_of_invitations || "N/A",
+            scoreRange: docData.score_range || "N/A",
+            invitationsIssued: docData.number_of_invitations_issued || "N/A",
           });
 
           await ref.update({ notified: true });
