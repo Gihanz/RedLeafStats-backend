@@ -41,7 +41,7 @@ module.exports = async (req, res) => {
               .digest("hex"),
           };
           inserted.push(summary);
-          console.log(`✅ Prepared summary for year ${year}`);
+          console.log(`✅ Added summary for year ${year}`);
         }
       }
 
@@ -99,24 +99,6 @@ module.exports = async (req, res) => {
     let skippedCount = 0;
 
     for (const draw of inserted) {
-      // Handle summaries separately
-      if (draw.document_type === "summary") {
-        const summaryQuery = await db
-          .collection("oinp_rounds")
-          .where("document_type", "==", "summary")
-          .where("year", "==", draw.year)
-          .get();
-
-        if (!summaryQuery.empty) {
-          // Update only summaryItems
-          const summaryDoc = summaryQuery.docs[0];
-          await summaryDoc.ref.update({ summaryItems: draw.summaryItems });
-          console.log(`♻️ Updated existing summary for year ${draw.year}`);
-          skippedCount++;
-          continue;
-        }
-      }
-
       const ref = db.collection("oinp_rounds").doc(draw.id);
       const existing = await ref.get();
 
@@ -166,6 +148,8 @@ module.exports = async (req, res) => {
     });
   } catch (err) {
     console.error("❌ Scraping error:", err.message);
-    return res.status(500).json({ error: "Failed to scrape OINP draws" });
+    return res
+      .status(500)
+      .json({ error: "Failed to scrape OINP draws" });
   }
 };
