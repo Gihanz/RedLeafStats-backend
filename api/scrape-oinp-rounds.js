@@ -6,55 +6,66 @@ const db = require("../lib/firestore");
 const clean = (v = "") => v.trim().replace(/\s+/g, " ");
 
 module.exports = async (req, res) => {
-  console.log("🌐 Starting OINP scrape...");
-
-  const url =
-    "https://www.ontario.ca/page/ontario-immigrant-nominee-program-oinp-invitations-apply";
+  console.log("🌐 Starting scrape of OINP rounds...");
 
   try {
+    const url =
+      "https://www.ontario.ca/page/ontario-immigrant-nominee-program-oinp-invitations-apply";
     const { data } = await axios.get(url);
     const $ = cheerio.load(data);
 
-    const scraped = [];
+    const inserted = [];
 
-    // Parse each year section
+    // Iterate through year headings
     $("h2").each((_, h2) => {
-      const heading = clean($(h2).text());
-      const match = heading.match(/Invitations to apply issued in (\d{4})/);
+      const headingText = clean($(h2).text());
+      const match = headingText.match(/Invitations to apply issued in (\d{4})/);
       if (!match) return;
 
       const year = parseInt(match[1], 10);
+
       let $next = $(h2).next();
 
-      // Summary UL (rarely useful)
+      // --- Process summary list ---
       if ($next.is("ul")) {
-        const items = $next
-          .find("li")
-          .map((_, li) => clean($(li).text()))
-          .get();
+        const summaryItems = [];
+        $next.find("li").each((_, li) => {
+          summaryItems.push(clean($(li).text()));
+        });
 
-        if (items.length) {
-          scraped.push({
+        if (summaryItems.length > 0) {
+          const summary = {
             year,
-            document_type: "summary",
             stream: "N/A",
-            summary_items: items,
-          });
+            summaryItems,
+            document_type: "summary",
+            createdAt: new Date(),
+            updatedAt: new Date(),
+            id: `summary-${year}`, // stable ID per year
+          };
+          inserted.push(summary);
+          console.log(`📘 Parsed summary for year ${year}`);
         }
 
         $next = $next.next();
       }
 
-      // Tables (draws)
+      // --- Process draw tables ---
       while ($next.length && !$next.is("h2")) {
         if ($next.is("table")) {
           const headers = $next
             .find("thead tr th")
-            .map((_, th) => clean($(th).text().toLowerCase().replace(/\s+/g, "_")))
+            .map((_, th) =>
+              clean($(th).text().toLowerCase().replace(/\s+/g, "_"))
+            )
             .get();
 
           const stream =
             clean($next.prevAll("h3, h4").first().text()) || "Unknown Stream";
+
+          const isDataTable =
+            headers.includes("date_issued") ||
+            headers.includes("number_of_invitations");
 
           $next.find("tbody tr").each((_, tr) => {
             const cells = $(tr).find("td");
@@ -65,12 +76,25 @@ module.exports = async (req, res) => {
               draw[headers[i]] = clean($(td).text());
             });
 
-            // Mandatory fields
             draw.stream = stream;
             draw.year = year;
-            draw.document_type = "draw";
+            draw.document_type = isDataTable ? "draw" : "summary";
 
-            scraped.push(draw);
+            // Use stable ID for draws: year + date_issued
+            const dateIssued = draw.date_issued || draw.date;
+            if (dateIssued) {
+              draw.id = `${year}-${dateIssued}`
+                .toLowerCase()
+                .replace(/\s+/g, "_");
+            } else {
+              // fallback in case date missing
+              draw.id = crypto
+                .createHash("md5")
+                .update(JSON.stringify(draw))
+                .digest("hex");
+            }
+
+            inserted.push(draw);
           });
         }
 
@@ -78,101 +102,112 @@ module.exports = async (req, res) => {
       }
     });
 
-    console.log(`📦 Parsed ${scraped.length} records from HTML`);
+    console.log(`📦 Parsed total ${inserted.length} records`);
 
-    let added = 0;
-    let updated = 0;
-    let emailed = 0;
-    let skipped = 0;
+    // --- Upsert into Firestore ---
+    let addedCount = 0;
+    let updatedCount = 0;
+    let emailedCount = 0;
+    let skippedCount = 0;
 
-    for (const row of scraped) {
-      if (row.document_type !== "draw") continue;
+    for (const doc of inserted) {
+      const ref = db.collection("oinp_rounds").doc(doc.id);
+      const snap = await ref.get();
+      const exists = snap.exists;
+      const prev = snap.data();
 
-      const dateIssued = row.date_issued || row.date;
-      if (!dateIssued) {
-        console.warn("⚠️ Missing date_issued for row, skipping", row);
+      // --- Summary documents ---
+      if (doc.document_type === "summary") {
+        if (!exists) {
+          await ref.set(doc);
+          addedCount++;
+          console.log(`📘 Added summary for year ${doc.year}`);
+        } else {
+          // Only update if summary items changed
+          const changed =
+            JSON.stringify(prev.summaryItems) !== JSON.stringify(doc.summaryItems);
+
+          if (changed) {
+            await ref.update({
+              summaryItems: doc.summaryItems,
+              updatedAt: new Date(),
+            });
+            updatedCount++;
+            console.log(`♻️ Updated summary for year ${doc.year}`);
+          } else {
+            skippedCount++;
+          }
+        }
         continue;
       }
 
-      // Stable ID: Year + Date (streams rarely collide per day)
-      const id = `${row.year}-${dateIssued}`.toLowerCase().replace(/\s+/g, "_");
-
-      const ref = db.collection("oinp_rounds").doc(id);
-      const snapshot = await ref.get();
-      const exists = snapshot.exists;
-      const prev = snapshot.data();
-
+      // --- Draw documents ---
       const baseDoc = {
-        ...row,
-        id,
+        ...doc,
         createdAt: exists ? prev.createdAt : new Date(),
-        updatedAt: exists ? new Date() : null,
+        updatedAt: new Date(),
         notified: exists ? prev.notified ?? false : false,
       };
 
       if (!exists) {
         await ref.set(baseDoc);
-        added++;
-        console.log(`🆕 Added draw: ${id}`);
+        addedCount++;
+        console.log(`✅ Added draw ${doc.date_issued || doc.stream} [${doc.stream}]`);
       } else {
+        // Only update if content changed (ignoring notified)
         const changed =
           JSON.stringify({ ...prev, notified: undefined }) !==
           JSON.stringify({ ...baseDoc, notified: undefined });
 
         if (changed) {
-          await ref.update({
-            ...baseDoc,
-            updatedAt: new Date(),
-          });
-          updated++;
-          console.log(`♻️ Updated draw: ${id}`);
+          await ref.update(baseDoc);
+          updatedCount++;
+          console.log(`♻️ Updated draw ${doc.id}`);
         } else {
-          skipped++;
+          skippedCount++;
         }
       }
 
-      // Re-evaluate the saved doc
-      const doc = (await ref.get()).data();
-
-      // Email only if it's a new draw and unnotified
-      if (doc.document_type === "draw" && !doc.notified) {
+      // --- Email notification for new draws ---
+      const currentDoc = (await ref.get()).data();
+      if (currentDoc.document_type === "draw" && !currentDoc.notified) {
         try {
           await axios.post(
             `${process.env.BASE_URL}/api/send-oinp-draw-email`,
             {
-              stream: doc.stream,
-              dateIssued: doc.date_issued || "Unknown Date",
-              scoreRange: doc.score_range || "N/A",
+              stream: currentDoc.stream,
+              dateIssued: currentDoc.date_issued || "Unknown Date",
+              scoreRange: currentDoc.score_range || "N/A",
               invitationsIssued:
-                doc.number_of_invitations_issued || doc.number_of_invitations || "N/A",
+                currentDoc.number_of_invitations_issued ||
+                currentDoc.number_of_invitations ||
+                "N/A",
             }
           );
 
           await ref.update({ notified: true });
-          emailed++;
-          console.log(`📧 Email sent + marked notified for ${id}`);
+          emailedCount++;
+          console.log(`📧 Email sent + marked notified for ${doc.id}`);
         } catch (err) {
-          console.error(`⚠️ Email failed for ${id}`, err.message);
+          console.error(`⚠️ Failed to send email for draw ${doc.id}:`, err.message);
         }
-      } else {
-        skipped++;
       }
     }
 
     return res.status(200).json({
       message: "OINP rounds scraped and synced",
       stats: {
-        added,
-        updated,
-        emailed,
-        skipped,
-        totalScraped: scraped.length,
+        totalScraped: inserted.length,
+        added: addedCount,
+        updated: updatedCount,
+        emailed: emailedCount,
+        skipped: skippedCount,
       },
     });
   } catch (err) {
-    console.error("❌ Scrape error:", err);
+    console.error("❌ Scraping error:", err);
     return res.status(500).json({
-      error: "Scrape failed",
+      error: "Failed to scrape OINP draws",
       details: err.message,
     });
   }
