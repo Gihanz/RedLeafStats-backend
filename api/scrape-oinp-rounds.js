@@ -13,13 +13,15 @@ module.exports = async (req, res) => {
     const $ = cheerio.load(data);
 
     const inserted = [];
+    let latestYear = 0;
 
     $("h2").each((_, h2) => {
       const headingText = $(h2).text().trim();
       const match = headingText.match(/Invitations to apply issued in (\d{4})/);
       if (!match) return;
 
-      const year = match[1];
+      const year = parseInt(match[1], 10);
+      if (year > latestYear) latestYear = year;
 
       let $next = $(h2).next();
       if ($next.is("ul")) {
@@ -56,8 +58,7 @@ module.exports = async (req, res) => {
             );
           });
 
-          const stream =
-            $next.prevAll("h3, h4").first().text().trim() || "Unknown Stream";
+          const stream = $next.prevAll("h3, h4").first().text().trim() || "Unknown Stream";
 
           const isDataTable =
             headers.includes("date_issued") ||
@@ -100,6 +101,22 @@ module.exports = async (req, res) => {
 
     for (const draw of inserted) {
       const ref = db.collection("oinp_rounds").doc(draw.id);
+
+      // If this is a summary for the latest year, delete existing first
+
+      if (draw.document_type === "summary" && draw.year === latestYear) {
+        const snapshot = await db
+          .collection("oinp_rounds")
+          .where("document_type", "==", "summary")
+          .where("year", "==", latestYear)
+          .get();
+
+        for (const doc of snapshot.docs) {
+          await db.collection("oinp_rounds").doc(doc.id).delete();
+          console.log(`🗑 Deleted old summary ${doc.id} for latest year`);
+        }
+      }
+
       const existing = await ref.get();
 
       if (!existing.exists) {
@@ -107,9 +124,7 @@ module.exports = async (req, res) => {
         await ref.set({ ...draw, notified: false });
         addedCount++;
         console.log(
-          `✅ Added new OINP draw ${draw.date_issued || draw.stream} [${
-            draw.stream
-          }]`
+          `✅ Added new OINP draw ${draw.date_issued || draw.stream} [${draw.stream}]`
         );
       }
 
